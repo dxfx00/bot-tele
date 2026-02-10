@@ -22,11 +22,15 @@ def get_main_menu():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_upload_menu():
-    keyboard = [[KeyboardButton("❌ Batal Registrasi")]]
+    # Menambahkan kembali tombol instruksi sesuai permintaan kamu
+    keyboard = [
+        [KeyboardButton("📸 Kirim Bukti Subscribe"), KeyboardButton("📸 Kirim Bukti Like")],
+        [KeyboardButton("❌ Batal Registrasi")]
+    ]
     return ReplyKeyboardMarkup(
         keyboard, 
         resize_keyboard=True, 
-        input_field_placeholder="Kirim Foto Screenshot ke sini..."
+        input_field_placeholder="Lampirkan foto bukti di sini..."
     )
 
 def get_link_menu():
@@ -76,9 +80,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
             "🔒 <b>MODE REGISTRASI AKTIF</b>\n\n"
             f"Silakan <b>Subscribe & Like</b> di sini:\n{YT_LINK}\n\n"
-            "📸 <b>TUGAS:</b> Kirimkan <b>2 Screenshot</b> bukti secara bergantian ke sini.\n"
+            "📸 <b>TUGAS:</b>\n"
+            "Klik ikon penjepit kertas (attachment) dan kirimkan <b>2 Screenshot</b> bukti ke sini."
         )
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_upload_menu(), disable_web_page_preview=True)
+
+    elif "Kirim Bukti" in text:
+        # Jika user menekan tombol instruksi, ingatkan untuk kirim foto asli
+        await update.message.reply_text(
+            "Silakan kirimkan <b>FOTO ASLI</b> melalui menu lampiran (attachment) di bawah.",
+            parse_mode='HTML'
+        )
 
     elif "Batal" in text or "Kembali" in text:
         context.user_data.clear()
@@ -94,20 +106,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Silakan klik link di atas dan pilih <b>'Request to Join'</b>.", 
                     parse_mode='HTML'
                 )
-            else:
-                await update.message.reply_text("❌ Gagal membuat link. Hubungi Admin.")
         else:
-            await update.message.reply_text("⛔ <b>Akses Ditolak!</b> Selesaikan kirim bukti dulu.", parse_mode='HTML')
+            await update.message.reply_text("⛔ <b>Akses Ditolak!</b> Selesaikan kirim bukti foto dulu.", parse_mode='HTML')
 
     elif "Status" in text:
-        status = "⏳ Menunggu Konfirmasi Admin" if f"pending_{user_id}" in context.bot_data else "❌ Tidak ada permintaan aktif."
+        status = "⏳ Menunggu Admin" if f"pending_{user_id}" in context.bot_data else "❌ Tidak ada permintaan aktif."
         await update.message.reply_text(f"Status: <b>{status}</b>", parse_mode='HTML')
 
     elif "Bantuan" in text:
         await update.message.reply_text(f"Hubungi Admin: <a href='tg://user?id={ADMIN_ID}'>Klik di Sini</a>", parse_mode='HTML')
 
 async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Hanya proses jika user dalam status registrasi
     if context.user_data.get('status') != 'uploading_proofs':
         await update.message.reply_text("⚠️ Silakan klik menu <b>📝 Registrasi</b> terlebih dahulu.", parse_mode='HTML')
         return
@@ -119,7 +128,6 @@ async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     photo_id = update.message.photo[-1].file_id
     try:
-        # Kirim bukti ke Admin
         await context.bot.send_photo(
             chat_id=ADMIN_ID,
             photo=photo_id,
@@ -165,7 +173,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if action == "app":
             await context.bot.approve_chat_join_request(chat_id=c_id, user_id=u_id)
             try:
-                await context.bot.send_message(u_id, "🥳 <b>Selamat!</b> Permintaan Anda disetujui Admin. Silakan masuk ke grup.", parse_mode='HTML')
+                await context.bot.send_message(u_id, "🥳 <b>Selamat!</b> Permintaan Anda disetujui Admin.", parse_mode='HTML')
             except: pass
             await query.edit_message_text(f"✅ Berhasil Menyetujui ID: {u_id}")
         else:
@@ -179,7 +187,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     
-    # Tambahkan filter ChatType.PRIVATE agar bot hanya aktif di japri
     app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     
