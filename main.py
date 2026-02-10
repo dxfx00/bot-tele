@@ -1,10 +1,8 @@
 import logging
-import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, ChatJoinRequestHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, CommandHandler
 
 # --- KONFIGURASI ---
-# Disarankan menggunakan Environment Variables di Railway, tapi saya tetap pasang di sini agar langsung jalan
 TOKEN = '8370842756:AAEbjHtrnZNPnduqGNl-mTyuVmE8iuNB4fE'
 ADMIN_ID = 7655136272
 GROUP_CHAT_ID = -1003649901491
@@ -24,15 +22,11 @@ def get_main_menu():
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_upload_menu():
-    keyboard = [
-        [KeyboardButton("📸 Kirim Bukti Subscribe"), KeyboardButton("📸 Kirim Bukti Like")],
-        [KeyboardButton("❌ Batal Registrasi")]
-    ]
-    # PERBAIKAN: Menggunakan 'input_field_placeholder' bukan 'placeholder'
+    keyboard = [[KeyboardButton("❌ Batal Registrasi")]]
     return ReplyKeyboardMarkup(
         keyboard, 
         resize_keyboard=True, 
-        input_field_placeholder="Kirim 2 Foto Screenshot..."
+        input_field_placeholder="Kirim Foto Screenshot ke sini..."
     )
 
 def get_link_menu():
@@ -74,41 +68,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
 
-    # PERBAIKAN: Menggunakan 'in' agar lebih aman dengan emoji/spasi
     if "Registrasi" in text:
         context.user_data['proof_count'] = 0
         context.user_data['status'] = 'uploading_proofs'
+        context.user_data['proof_completed'] = False
         
         msg = (
             "🔒 <b>MODE REGISTRASI AKTIF</b>\n\n"
             f"Silakan <b>Subscribe & Like</b> di sini:\n{YT_LINK}\n\n"
-            "📸 <b>TUGAS:</b> Kirimkan 2 Screenshot bukti sekarang.\n"
+            "📸 <b>TUGAS:</b> Kirimkan <b>2 Screenshot</b> bukti secara bergantian ke sini.\n"
         )
-        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_upload_menu())
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_upload_menu(), disable_web_page_preview=True)
 
     elif "Batal" in text or "Kembali" in text:
         context.user_data.clear()
-        await update.message.reply_text("Kembali ke Menu Utama:", reply_markup=get_main_menu())
+        await update.message.reply_text("✅ Kembali ke Menu Utama:", reply_markup=get_main_menu())
 
     elif "Request Link" in text:
         if context.user_data.get('proof_completed'):
-            await update.message.reply_text("⏳ Membuat link unik...")
+            await update.message.reply_text("⏳ Sedang membuat link unik...")
             link = await generate_unique_link(context, user_name)
             if link:
-                await update.message.reply_text(f"✅ <b>Link Akses:</b>\n{link}\n\nSilakan klik dan pilih 'Request to Join'.", parse_mode='HTML')
+                await update.message.reply_text(
+                    f"✅ <b>Link Akses:</b>\n{link}\n\n"
+                    "Silakan klik link di atas dan pilih <b>'Request to Join'</b>.", 
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text("❌ Gagal membuat link. Hubungi Admin.")
         else:
-            await update.message.reply_text("⛔ Selesaikan bukti dulu!")
+            await update.message.reply_text("⛔ <b>Akses Ditolak!</b> Selesaikan kirim bukti dulu.", parse_mode='HTML')
 
     elif "Status" in text:
-        status = "⏳ Menunggu Admin" if f"pending_{user_id}" in context.bot_data else "❌ Tidak ada permintaan aktif."
+        status = "⏳ Menunggu Konfirmasi Admin" if f"pending_{user_id}" in context.bot_data else "❌ Tidak ada permintaan aktif."
         await update.message.reply_text(f"Status: <b>{status}</b>", parse_mode='HTML')
 
     elif "Bantuan" in text:
         await update.message.reply_text(f"Hubungi Admin: <a href='tg://user?id={ADMIN_ID}'>Klik di Sini</a>", parse_mode='HTML')
 
 async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Hanya proses jika user dalam status registrasi
     if context.user_data.get('status') != 'uploading_proofs':
-        await update.message.reply_text("Klik 📝 Registrasi dulu!")
+        await update.message.reply_text("⚠️ Silakan klik menu <b>📝 Registrasi</b> terlebih dahulu.", parse_mode='HTML')
         return
 
     user_id = update.effective_user.id
@@ -118,6 +119,7 @@ async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     photo_id = update.message.photo[-1].file_id
     try:
+        # Kirim bukti ke Admin
         await context.bot.send_photo(
             chat_id=ADMIN_ID,
             photo=photo_id,
@@ -128,7 +130,7 @@ async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Gagal kirim ke admin: {e}")
 
     if current_count < 2:
-        await update.message.reply_text(f"✅ Bukti ke-{current_count} diterima. Kirim 1 foto lagi!")
+        await update.message.reply_text(f"✅ Bukti ke-{current_count} diterima. Kirim <b>1 foto lagi</b>!", parse_mode='HTML')
     else:
         context.user_data['proof_completed'] = True
         context.user_data['status'] = 'completed'
@@ -142,10 +144,16 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     u = update.chat_join_request.from_user
     c_id = update.chat_join_request.chat.id
     context.bot_data[f"pending_{u.id}"] = c_id
+    
     btn = [[InlineKeyboardButton("Approve ✅", callback_data=f"app_{u.id}_{c_id}"),
             InlineKeyboardButton("Decline ❌", callback_data=f"dec_{u.id}_{c_id}")]]
-    await context.bot.send_message(ADMIN_ID, f"🚨 <b>JOIN REQ:</b> {u.full_name}\nID: <code>{u.id}</code>", 
-                                   parse_mode='HTML', reply_markup=InlineKeyboardMarkup(btn))
+            
+    await context.bot.send_message(
+        ADMIN_ID, 
+        f"🚨 <b>JOIN REQUEST BARU</b>\n👤 Nama: {u.full_name}\n🆔 ID: <code>{u.id}</code>", 
+        parse_mode='HTML', 
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -155,12 +163,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         if action == "app":
-            await context.bot.approve_chat_join_request(c_id, u_id)
-            await context.bot.send_message(u_id, "🥳 Permintaan Anda disetujui! Silakan masuk ke grup.")
-            await query.edit_message_text(f"✅ Approved {u_id}")
+            await context.bot.approve_chat_join_request(chat_id=c_id, user_id=u_id)
+            try:
+                await context.bot.send_message(u_id, "🥳 <b>Selamat!</b> Permintaan Anda disetujui Admin. Silakan masuk ke grup.", parse_mode='HTML')
+            except: pass
+            await query.edit_message_text(f"✅ Berhasil Menyetujui ID: {u_id}")
         else:
-            await context.bot.decline_chat_join_request(c_id, u_id)
-            await query.edit_message_text(f"❌ Declined {u_id}")
+            await context.bot.decline_chat_join_request(chat_id=c_id, user_id=u_id)
+            await query.edit_message_text(f"❌ Menolak ID: {u_id}")
+        
         context.bot_data.pop(f"pending_{u_id}", None)
     except Exception as e:
         await query.edit_message_text(f"❌ Gagal: {e}")
@@ -168,13 +179,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     
-    app.add_handler(CommandHandler("start", start))
+    # Tambahkan filter ChatType.PRIVATE agar bot hanya aktif di japri
+    app.add_handler(CommandHandler("start", start, filters=filters.ChatType.PRIVATE))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_screenshot))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_message))
+    
     app.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Bot standby...")
+    print("Bot standby di chat pribadi...")
     app.run_polling()
 
 if __name__ == '__main__':
